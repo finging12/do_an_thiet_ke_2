@@ -1,3 +1,4 @@
+// Thu vien cho LCD1602
 #ifndef HUNGET_LCD_H
 #define HUNGET_LCD_H
 
