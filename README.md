@@ -1,4 +1,6 @@
 # do_an_thiet_ke_2
+17/07/2026
+
 Sinh viên thực hiện: Lê Nguyễn Sơn Tùng
 Mã số sinh viên: 20224193
 Đề tà: Cảm biến đo nhiệt độ ứng dụng trong nhà kính.
