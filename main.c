@@ -1,10 +1,10 @@
-
 #define F_CPU 8000000UL
 #include <avr/io.h>
 #include <util/delay.h>
 #include <stdio.h>
 
 #include "hunget_lcd.h" // Thu vien LCD
+
 // =============================================
 // Relay
 #define RELAY_FAN_DDR      DDRA
@@ -14,6 +14,7 @@
 #define RELAY_BUZZER_DDR   DDRA
 #define RELAY_BUZZER_PORT  PORTA
 #define RELAY_BUZZER_PIN   3    // PA3
+
 // =============================================
 // Dinh nghia nut bam PORTB
 
@@ -47,37 +48,53 @@ void BUTTON_INIT() {
 }
 
 // =============================================
-// HÀM ĐỌC NÚT BẤM
+// HÀM ĐỌC NÚT BẤM (ĐÃ SỬA - THÊM CHỐNG RUNG TỐT HƠN)
 // =============================================
 uint8_t BUTTON_READ(uint8_t pin_bit) {
 	static uint16_t hold_counter[4] = {0, 0, 0, 0};
+	static uint8_t last_state[4] = {1, 1, 1, 1};  // Trạng thái trước đó
 	
-	if (!(PINB & (1 << pin_bit))) {
-		hold_counter[pin_bit]++;
-		
-		if (hold_counter[pin_bit] == 1) {
-			return 1;
-		}
-		
-		if (hold_counter[pin_bit] > 50) {
-			hold_counter[pin_bit] = 45;
-			return 1;
-		}
-		
-		} else {
-		hold_counter[pin_bit] = 0;
+	uint8_t current_state = (PINB & (1 << pin_bit)) ? 1 : 0;
+	
+	if (current_state == 0 && last_state[pin_bit] == 1) {  // Nhấn xuống
+		last_state[pin_bit] = 0;
+		return 1;
+	}
+	
+	if (current_state == 1 && last_state[pin_bit] == 0) {  // Nhả ra
+		last_state[pin_bit] = 1;
 	}
 	
 	return 0;
 }
 
 // =============================================
-// HÀM KHỞI TẠO RELAY
+// HÀM KHỞI TẠO RELAY (ĐÃ SỬA - RELAY ACTIVE HIGH)
 // =============================================
 void RELAY_INIT() {
 	RELAY_FAN_DDR |= (1 << RELAY_FAN_PIN) | (1 << RELAY_BUZZER_PIN);
-	RELAY_FAN_PORT |= (1 << RELAY_FAN_PIN);
+	// Tắt relay ban đầu (Active HIGH: 0 = OFF)
+	RELAY_FAN_PORT &= ~(1 << RELAY_FAN_PIN);
+	RELAY_BUZZER_PORT &= ~(1 << RELAY_BUZZER_PIN);
+}
+
+// =============================================
+// HÀM BẬT/TẮT RELAY (ĐÃ SỬA - ACTIVE HIGH)
+// =============================================
+void RELAY_FAN_ON() {
+	RELAY_FAN_PORT |= (1 << RELAY_FAN_PIN);   // HIGH = ON
+}
+
+void RELAY_FAN_OFF() {
+	RELAY_FAN_PORT &= ~(1 << RELAY_FAN_PIN);  // LOW = OFF
+}
+
+void RELAY_BUZZER_ON() {
 	RELAY_BUZZER_PORT |= (1 << RELAY_BUZZER_PIN);
+}
+
+void RELAY_BUZZER_OFF() {
+	RELAY_BUZZER_PORT &= ~(1 << RELAY_BUZZER_PIN);
 }
 
 // =============================================
@@ -130,28 +147,28 @@ void HANDLE_BUTTONS() {
 // HÀM ĐIỀU KHIỂN 7 LED (PD0-PD6)
 // =============================================
 void LED_ON() {
-	PORTD &= 0x80;   // Xóa PD0-PD6 về 0 -> 7 LED SÁNG, giữ PD7
+	PORTD &= 0x80;
 }
 
 void LED_OFF() {
-	PORTD |= 0x7F;   // Set PD0-PD6 lên 1 -> 7 LED TẮT, giữ PD7
+	PORTD |= 0x7F;
 }
 
 // =============================================
 // HÀM CHÍNH
 // =============================================
 int main(void) {
-	// 1. TẮT JTAG
-	MCUCSR |= (1 << JTD);
-	MCUCSR |= (1 << JTD);
+	// 1. TẮT JTAG (QUAN TRỌNG - LÀM 2 LẦN)
+	MCUCSR = (1 << JTD);  // SỬA: Ghi trực tiếp
+	MCUCSR = (1 << JTD);  // SỬA: Làm 2 lần
 
 	// 2. KHỞI TẠO LED 7 ĐOẠN
 	DDRC = 0xFF;
 	PORTC = 0x00;
 
 	// 3. KHỞI TẠO 7 LED ĐƠN (PD0-PD6)
-	DDRD |= 0x7F;   // PD0-PD6 Output
-	LED_ON();       // Mặc định BẬT hết 7 LED (≤ ngưỡng)
+	DDRD |= 0x7F;
+	LED_ON();
 
 	// 4. KHỞI TẠO
 	LCD4_INIT(0, 0);
@@ -183,7 +200,7 @@ int main(void) {
 			_delay_ms(1);
 		}
 		avg_adc = sum_adc / 10;
-		uint32_t voltage_mv = ((uint32_t)avg_adc * 5000) / 1023;
+		uint32_t voltage_mv = ((uint32_t)avg_adc * 5000) / 1024;  // SỬA: 1024
 		temp_val = voltage_mv;
 
 		// --- LCD DÒNG 1 ---
@@ -197,41 +214,43 @@ int main(void) {
 		
 		if (auto_mode) {
 			if (temp_val > threshold) {
-				// TRÊN NGƯỠNG: TẮT LED, BẬT RELAY
 				sprintf(buffer, "HIGH  Th:%u.%u C ", threshold / 10, threshold % 10);
 				LCD4_OUT_STR(buffer);
 				LED7_REFRESH();
 				
-				LED_OFF();      // TẮT 7 LED
+				LED_OFF();
 				
-				RELAY_FAN_PORT &= ~(1 << RELAY_FAN_PIN);
-				RELAY_BUZZER_PORT &= ~(1 << RELAY_BUZZER_PIN);
+				// SỬA: Dùng hàm RELAY mới
+				RELAY_FAN_ON();
+				RELAY_BUZZER_ON();
 				
-				} else {
-				// DƯỚI NGƯỠNG: BẬT LED, TẮT RELAY
+			} else {
 				sprintf(buffer, "NORM  Th:%u.%u C ", threshold / 10, threshold % 10);
 				LCD4_OUT_STR(buffer);
 				LED7_REFRESH();
 				
-				LED_ON();       // BẬT 7 LED
+				LED_ON();
 				
-				RELAY_FAN_PORT |= (1 << RELAY_FAN_PIN);
-				RELAY_BUZZER_PORT |= (1 << RELAY_BUZZER_PIN);
+				// SỬA: Dùng hàm RELAY mới
+				RELAY_FAN_OFF();
+				RELAY_BUZZER_OFF();
 			}
 			
-			} else {
+		} else {
 			sprintf(buffer, "MANUAL Th:%u.%u C", threshold / 10, threshold % 10);
 			LCD4_OUT_STR(buffer);
 			LED7_REFRESH();
 			
-			LED_ON();   // Manual: BẬT LED
+			LED_ON();
 			
 			if (manual_fan) {
-				RELAY_FAN_PORT &= ~(1 << RELAY_FAN_PIN);
-				RELAY_BUZZER_PORT &= ~(1 << RELAY_BUZZER_PIN);
-				} else {
-				RELAY_FAN_PORT |= (1 << RELAY_FAN_PIN);
-				RELAY_BUZZER_PORT |= (1 << RELAY_BUZZER_PIN);
+				// SỬA: Dùng hàm RELAY mới
+				RELAY_FAN_ON();
+				RELAY_BUZZER_ON();
+			} else {
+				// SỬA: Dùng hàm RELAY mới
+				RELAY_FAN_OFF();
+				RELAY_BUZZER_OFF();
 			}
 		}
 
